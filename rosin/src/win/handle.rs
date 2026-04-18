@@ -50,11 +50,66 @@ impl WindowHandle {
     pub fn set_input_handler(&self, _id: Option<NodeId>, _handler: Option<Box<dyn InputHandler + Send + Sync>>) {}
 
     pub fn get_logical_size(&self) -> Size {
-        Size::ZERO
+        use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+        use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
+        use windows::Win32::UI::HiDpi::GetDpiForWindow;
+        use windows::Win32::Foundation::RECT;
+
+        self.view.block_on_thread(
+            // uses the formula `DIPs = pixels / (DPI / USER_DEFAULT_SCREEN_DPI)` but refactored a bit
+            |view| {
+                let mut rect: RECT = Default::default();
+
+                let desktop_dpi = unsafe {
+                    GetDpiForWindow(GetDesktopWindow()) as f64
+                };
+
+                let view_dpi = unsafe {
+                    GetDpiForWindow(view.hwnd()) as f64
+                };
+
+                let scale_factor = desktop_dpi / view_dpi;
+                
+                unsafe {
+                    // SAFETY:
+                    //  - view.hwnd() is a valid window handle
+                    //  - &raw mut is a poitner to a valid RECT position in memory
+                    if let Err(err) = GetWindowRect(view.hwnd(), &raw mut rect) {
+                        eprintln!("`get_logical_size` {err}: {err:#?}");
+                    }
+                }
+                
+                Size::new(
+                    (rect.right - rect.left) as f64 * scale_factor,
+                    (rect.bottom - rect.top) as f64 * scale_factor,
+                )
+            }
+        )
     }
 
     pub fn get_physical_size(&self) -> Size {
-        Size::ZERO
+        use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+        use windows::Win32::Foundation::RECT;
+
+        self.view.block_on_thread(
+            |view| {
+                let mut rect: RECT = Default::default();
+                
+                unsafe {
+                    // SAFETY:
+                    //  - view.hwnd() is a valid window handle
+                    //  - &raw mut is a poitner to a valid RECT position in memory
+                    if let Err(err) = GetWindowRect(view.hwnd(), &raw mut rect) {
+                        eprintln!("`get_logical_size` {err}: {err:#?}");
+                    }
+                }
+                
+                Size::new(
+                    (rect.right - rect.left) as f64,
+                    (rect.bottom - rect.top) as f64,
+                )
+            }
+        )
     }
 
     pub fn get_position(&self) -> Point {
@@ -211,7 +266,56 @@ impl WindowHandle {
         None
     }
 
-    pub fn open_url(&self, _url: &str) {}
+    pub fn open_url(&self, url: &str) {
+        use windows::{
+            core::w,
+
+            Win32::UI::{
+                WindowsAndMessaging::SW_NORMAL,
+                Shell::ShellExecuteW,
+            },
+        };
+
+        use super::view::{
+            utf8_to_utf16,
+            utf16_as_pcwstr,
+        };
+
+        let url_utf16 = utf8_to_utf16(url);
+
+        self.view.queue_on_thread(
+            move |view| {
+                let result = unsafe {
+                    ShellExecuteW(
+                        Some(view.hwnd()),
+                        w!("open"),
+                        utf16_as_pcwstr(&url_utf16),
+                        None,
+                        None,
+                        SW_NORMAL,
+                    )  
+                };
+
+                // incase error handling is ever added this link lists all the error codes
+                // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecutew
+                match result.0 as usize {
+                    0..=32 => {
+                        let err = unsafe {
+                            // SAFETY: The ShellExecuteW function guarantees that
+                            //   an error did not occur only if the return code is > 32
+                            windows::Win32::Foundation::GetLastError()
+                        };
+                        eprintln!("`open_url` An error occured! #{code:p} {err:#?}", code = result.0);
+                    },
+                    33.. => (),
+                }
+            }
+        )
+
+        // https://learn.microsoft.com/en-us/windows/win32/winhttp/iwinhttprequest-open
+        // https://learn.microsoft.com/en-us/windows/win32/winhttp/winhttprequest
+        // https://microsoft.github.io/windows-docs-rs/doc/windows/Win32/Networking/WinHttp/struct.IWinHttpRequest.html
+    }
 
     pub fn open_file_dialog(&self, _node: Option<NodeId>, _options: FileDialogOptions) {}
 

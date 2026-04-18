@@ -1,4 +1,5 @@
-use std::{any::Any, time::Duration};
+
+use std::{any::Any, time::Duration, collections::VecDeque, sync::Mutex};
 
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Foundation::{HINSTANCE, HWND};
@@ -14,10 +15,33 @@ use crate::{
 
 use crate::desc::WindowDesc;
 
+// these 2 are separate to not drop the vec within the same fn,
+// to not cause a mem leak and to break apart the "expensive part" and the "cheep part"
+
+/// Converts a utf8 str to a utf16 vector
+/// 
+/// Allocates and copies the data
+pub(crate) fn utf8_to_utf16(string: &str) -> Vec<u16> {
+    let os_str = AsRef::<std::ffi::OsStr>::as_ref(string);
+
+    std::os::windows::ffi::OsStrExt::encode_wide(os_str)
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+/// Casts a rust utf16 slice to a win32 utf16 string
+/// 
+/// Is close to a noop
+pub(crate) fn utf16_as_pcwstr(slice: &[u16]) -> windows::core::PCWSTR {
+    windows::core::PCWSTR::from_raw(slice.as_ptr())
+}
+
 /// A struct for safely locking the use of a View on a single thread
 pub(crate) struct ThreadLockedView {
     view: RosinView,
     thread_id: u32,
+
+    action_queue: Mutex<VecDeque<Box<dyn FnOnce(&RosinView)>>>
 }
 
 impl ThreadLockedView {
@@ -33,6 +57,8 @@ impl ThreadLockedView {
                 GetWindowThreadProcessId(view.hwnd(), None)
             },
             view,
+
+            action_queue: Mutex::new(VecDeque::with_capacity(64)),
         }
     }
 
@@ -60,7 +86,22 @@ impl ThreadLockedView {
     where
         F: FnOnce(&RosinView) + Sync + 'static,
     {
-        todo!()
+        let current_id = unsafe { GetCurrentThreadId() };
+
+        let mut queue = self
+            .action_queue
+            .lock()
+            .expect("Can not do anything if the `action_queue` is poisoned except *maybe* recover it?");
+
+        if self.thread_id == current_id {
+            for func in queue.drain(..) {
+                func(&self.view)
+            }
+
+            f(&self.view)
+        } else {
+            queue.push_back(Box::new(f))
+        }
     }
 
     pub fn block_on_thread<F, R>(&self, f: F) -> R
@@ -68,14 +109,14 @@ impl ThreadLockedView {
         F: FnOnce(&RosinView) -> R + Sync + 'static,
         R: Sync + 'static,
     {
-        todo!()
+        todo!("`block_on_thread` blocking on thread (hehe)")
     }
 }
 
-// SAFETY: You can only acces the !Send View if it's on the original thread
+// SAFETY: You can only acces the !Send View and UnsafeCell if it's on the original thread
 unsafe impl Send for ThreadLockedView {}
 
-// SAFETY: You can only acces the !Sync View if it's on the original thread
+// SAFETY: You can only acces the !Sync View and UnsafeCell if it's on the original thread
 unsafe impl Sync for ThreadLockedView {}
 
 pub(crate) struct RosinView {
@@ -233,13 +274,9 @@ impl RosinView {
                     // TODO check: From my testing this "clones" the string; Not 100% sure if it's sound or UB though
                     desc.title
                         .as_deref()
-                        .map(AsRef::<std::ffi::OsStr>::as_ref)
-                        .map(std::os::windows::ffi::OsStrExt::encode_wide)
-                        .map(|iter| std::iter::chain(iter, std::iter::once(0)))
-                        .map(Iterator::collect::<Vec<u16>>)
-                        .as_ref()
-                        .map(Vec::as_ptr)
-                        .map(windows::core::PCWSTR::from_raw)
+                        .map(utf8_to_utf16)
+                        .as_deref()
+                        .map(utf16_as_pcwstr)
                         .as_ref(),
                     window_style,
                     x,
