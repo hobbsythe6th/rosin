@@ -85,10 +85,16 @@ impl<S: Sync + 'static> AppLauncher<S> {
         self.state = Some(Rc::new(RefCell::new(state)));
         self.translation_map = Some(translation_map);
 
+        // temp fix
+        let translation_map_ref = self
+            .translation_map
+            .as_ref()
+            .expect("We set it to Some on the line above");
+
         let _window_handles: Vec<_> = self
             .windows
             .iter()
-            .map(|window_desc| RosinView::from_new_window(window_desc, Some(instance), None).unwrap_or_else(|err| todo!("Failed to create window: \"{err}\"")))
+            .map(|window_desc| RosinView::from_new_window(window_desc, Some(instance), None, translation_map_ref).unwrap_or_else(|err| todo!("Failed to create window: \"{err}\"")))
             .map(crate::platform::handle::WindowHandle::new)
             .collect();
 

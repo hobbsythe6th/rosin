@@ -314,7 +314,7 @@ fn menu(desc: &MenuDesc, translation_map: &TranslationMap) -> Result<HMENU, Erro
 
 // TODO: implement all the unused (menu) stuff
 impl RosinView {
-    pub fn from_new_window<S: 'static>(desc: &WindowDesc<S>, instance: Option<HINSTANCE>, parent: Option<WindowHandle>) -> Result<RosinView, Error> {
+    pub fn from_new_window<S: 'static>(desc: &WindowDesc<S>, instance: Option<HINSTANCE>, parent: Option<WindowHandle>, translation_map: &TranslationMap) -> Result<RosinView, Error> {
         use windows::Win32::UI::WindowsAndMessaging::{
             WINDOW_STYLE,
 
@@ -363,7 +363,7 @@ impl RosinView {
         let menu = desc
             .menu
             .as_ref()
-            .map(menu)
+            .map(|desc| menu(desc, translation_map))
             .transpose()
             .unwrap_or_else(
             |err| todo!("handling failure to create menu gracefully (aka returning an error).\n > \"{err}\" : {err:#?}")
