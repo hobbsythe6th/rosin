@@ -36,12 +36,35 @@ pub(crate) fn utf16_as_pcwstr(slice: &[u16]) -> windows::core::PCWSTR {
     windows::core::PCWSTR::from_raw(slice.as_ptr())
 }
 
+enum ActionBlock {
+    Uncalled(u32, Box<dyn FnOnce(&RosinView) -> Box<dyn Any + Send + 'static> + Send + 'static>),
+    Called(u32, Box<dyn Any + Send + 'static>),
+    Empty,
+}
+
+impl ActionBlock {
+    fn is_empty(&self) -> bool {
+        matches!(self, ActionBlock::Empty)
+    }
+
+    fn is_called(&self) -> bool {
+        matches!(self, ActionBlock::Called(_, _))
+    }
+
+    fn is_uncalled(&self) -> bool {
+        matches!(self, ActionBlock::Uncalled(_, _))
+    }
+}
+
 /// A struct for safely locking the use of a View on a single thread
 pub(crate) struct ThreadLockedView {
     view: RosinView,
     thread_id: u32,
 
-    action_queue: Mutex<VecDeque<Box<dyn FnOnce(&RosinView)>>>
+    action_queue: Mutex<VecDeque<Box<dyn FnOnce(&RosinView)>>>,
+
+    // maybe a `Slab` could work better here than a `VecDeque`?
+    action_blocks: Mutex<VecDeque<ActionBlock>>,
 }
 
 impl ThreadLockedView {
@@ -51,6 +74,8 @@ impl ThreadLockedView {
     //
     // If there is a way to detect the "main" thread then it should be 110% added
     pub fn new(view: RosinView) -> ThreadLockedView {
+        const DEFAULT_CAPACITY: usize = 64;
+
         Self {
             thread_id: unsafe {
                 // SAFETY: this is ran on a valid thread
@@ -58,7 +83,13 @@ impl ThreadLockedView {
             },
             view,
 
-            action_queue: Mutex::new(VecDeque::with_capacity(64)),
+            action_queue: Mutex::new(VecDeque::with_capacity(DEFAULT_CAPACITY)),
+            action_blocks: Mutex::new(
+                VecDeque::from_iter(
+                    std::iter::repeat_with(|| ActionBlock::Empty)
+                        .take(DEFAULT_CAPACITY)
+                )
+            ),
         }
     }
 
@@ -76,15 +107,15 @@ impl ThreadLockedView {
     /// SAFETY: All actions performed on the given `&RosinView` must be locked to the thread `RosinView` was created on.
     pub unsafe fn try_on_trust<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&RosinView) -> R + Sync + 'static,
-        R: Sync + 'static,
+        F: FnOnce(&RosinView) -> R + Send + 'static,
+        R: Send + 'static,
     {
         f(&self.view)
     }
 
     pub fn queue_on_thread<F>(&self, f: F)
     where
-        F: FnOnce(&RosinView) + Sync + 'static,
+        F: FnOnce(&RosinView) + Send + 'static,
     {
         let current_id = unsafe { GetCurrentThreadId() };
 
@@ -104,12 +135,71 @@ impl ThreadLockedView {
         }
     }
 
+    // could this be done better with async?
     pub fn block_on_thread<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&RosinView) -> R + Sync + 'static,
-        R: Sync + 'static,
+        F: FnOnce(&RosinView) -> R + Send + 'static,
+        R: Send + 'static,
     {
-        todo!("`block_on_thread` blocking on thread (hehe)")
+        let current_id = unsafe { GetCurrentThreadId() };
+
+        let mut blocks = self
+            .action_blocks
+            .lock()
+            .expect("Can not do anything if the `action_blocks` is poisoned except *maybe* recover it?");
+
+        if self.thread_id == current_id {
+            for action in blocks.iter_mut() {
+                if !action.is_uncalled() {
+                    continue
+                };
+                let ActionBlock::Uncalled(thread_id, func) = std::mem::replace(action, ActionBlock::Empty) else {
+                    unreachable!("`block_on_thread`: We already sucsesfully checked that action is uncalled")
+                };
+                *action = ActionBlock::Called(thread_id, func(&self.view))
+            }
+
+            return f(&self.view);
+        } else {
+            let uncalled_action = ActionBlock::Uncalled(current_id, Box::new(|view| Box::new(f(view))));
+            let action = blocks
+                .iter_mut()
+                .find(|block| block.is_empty());
+
+            match action {
+                Some(action) => {
+                    *action = uncalled_action;
+                }
+                None => {
+                    blocks.push_back(uncalled_action)
+                }
+            }
+
+            eprintln!("Warning `block_on_thread`: The block check is likely a vary bad impl that should be replaced");
+            loop {
+                for block in blocks.iter_mut() {
+                    {
+                        let ActionBlock::Called(thread_id, _) = block else {
+                            continue
+                        };
+
+                        if *thread_id != current_id {
+                            continue
+                        }
+                    }
+
+                    let action = std::mem::replace(block, ActionBlock::Empty);
+
+                    let ActionBlock::Called(_, ret) = action else {
+                        unreachable!("`block_on_thread`: We already sucsesfully unpacked `block` into a `Action::Called` before")
+                    };
+
+                    return *ret.downcast().expect("Boxed the return type `R` earlyer");
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(1))
+            }
+        }
     }
 }
 
@@ -128,17 +218,23 @@ pub(crate) fn f64_to_i32(f: f64) -> i32 {
     f as i32
 }
 
-fn menu(desc: MenuDesc) -> Result<HMENU, Error> {
+fn menu(desc: &MenuDesc, translation_map: &TranslationMap) -> Result<HMENU, Error> {
     use crate::menu::{
         MenuItem,
 
         StandardAction,
     };
 
+    // use windows::core::Free;
     use windows::Win32::UI::WindowsAndMessaging::{
+        MENUITEMINFOW,
         CreateMenu,
         InsertMenuItemW,
-        SC_SEPARATOR
+        
+        MFT_SEPARATOR,
+
+        MIIM_STRING,
+        MIIM_SUBMENU,
     };
 
     let menu = unsafe {
@@ -148,8 +244,15 @@ fn menu(desc: MenuDesc) -> Result<HMENU, Error> {
 
     // use the InsertMenuItem, AppendMenu, and InsertMenu functions
 
-    for item in desc.items.iter() {
-        let insert = match item {
+    for (pos, item) in desc.items.iter().enumerate() {
+        let mut title_utf16;
+
+        let mut data = MENUITEMINFOW {
+            fMask: MIIM_STRING | MIIM_SUBMENU,
+            ..Default::default()
+        };
+        
+        match item {
             MenuItem::Action {
                 title,
                 command,
@@ -157,30 +260,51 @@ fn menu(desc: MenuDesc) -> Result<HMENU, Error> {
                 enabled,
                 selected,
             } => {
-                todo!("adding an action within a menu")
+                title_utf16 = utf8_to_utf16(&title.resolve(translation_map));
+                // todo!("adding an action within a menu")
             }
+
             MenuItem::Submenu { title, menu, enabled } => {
-                todo!("adding a submenu within a menu")
+                title_utf16 = utf8_to_utf16(&title.resolve(translation_map));
+                data.hSubMenu = self::menu(menu, translation_map)?;
             }
+
             MenuItem::Standard( standard ) => {
                 match standard {
-                    StandardAction::Copy      => todo!("adding a standard copy action within a menu"),
-                    StandardAction::Cut       => todo!("adding a standard cut action within a menu"),
-                    StandardAction::Paste     => todo!("adding a standard paste action within a menu"),
-                    StandardAction::SelectAll => todo!("adding a standard select all action within a menu"),
+                    StandardAction::Copy      => {
+                        title_utf16 = utf8_to_utf16("menu.copy");
+                        eprintln!("Only english supported for `Copy` in the menu");
+                        // todo!("adding a standard copy action within a menu")
+                    }
+
+                    StandardAction::Cut       => {
+                        todo!("adding a standard cut action within a menu")
+                    }
+
+                    StandardAction::Paste     => {
+                        todo!("adding a standard paste action within a menu")
+                    }
+
+                    StandardAction::SelectAll => {
+                        todo!("adding a standard select all action within a menu")
+                    }
                 }
             }
+
             MenuItem::Separator => {
-                todo!("adding a separator within a menu")
+                todo!("adding a separator within the menu")
             }
         };
+
+        data.dwTypeData = windows::core::PWSTR(title_utf16.as_mut_ptr());
+        data.cch = title_utf16.len() as u32;
 
         unsafe {
             InsertMenuItemW(
                 menu,
-                0 /* add here item stuff */,
-                false /* add here pos stuff */,
-                insert /* add here data stuff */,
+                pos as u32,
+                true,
+                &raw const data,
             )?
         }
     }
@@ -236,9 +360,14 @@ impl RosinView {
 
         let view_state = Box::new(ViewState::new());
 
-        let Ok(menu) = desc.menu.clone().map(menu).transpose() else {
-            todo!("handling failure to create menu gracefully (aka returning an error)")
-        };
+        let menu = desc
+            .menu
+            .as_ref()
+            .map(menu)
+            .transpose()
+            .unwrap_or_else(
+            |err| todo!("handling failure to create menu gracefully (aka returning an error).\n > \"{err}\" : {err:#?}")
+        );
 
         let window_style = {
             let mut window_style = WS_CAPTION | WS_SYSMENU;
