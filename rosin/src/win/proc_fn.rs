@@ -2,10 +2,10 @@ use std::ptr::NonNull;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{BeginPaint, COLOR_WINDOW, EndPaint, FillRect, HBRUSH, HDC, InvalidateRect, PAINTSTRUCT};
-use windows::Win32::UI::WindowsAndMessaging::{DefWindowProcW, PostQuitMessage, WM_DESTROY, WM_NCCREATE, WM_PAINT, WM_SIZE};
+use windows::Win32::UI::WindowsAndMessaging::{DefWindowProcW, PostQuitMessage, MINMAXINFO, WM_DESTROY, WM_NCCREATE, WM_PAINT, WM_SIZE, WM_GETMINMAXINFO};
 use windows::core::{Error, PCWSTR, w};
 
-use crate::platform::view::ViewState;
+use crate::platform::view::{ViewState, get_view_state};
 
 /// The main class of all windows on windows_os in rosin
 pub(crate) const ROSIN_CLASS: PCWSTR = w!("RosinGUI Windows Class");
@@ -23,16 +23,15 @@ pub(crate) unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w_param: WPARAM,
                 DefWindowProcW(hwnd, msg, w_param, l_param)
             };
         }
-        _ => unsafe {
-            use windows::Win32::UI::WindowsAndMessaging::{GWLP_USERDATA, GetWindowLongPtrW};
-
-            if cfg!(debug_assertions) && hwnd.is_invalid() {
-                eprintln!("window handle `{hwnd:?}` is invalid!");
-                None
-            } else {
+ 
+        _ => if cfg!(debug_assertions) && hwnd.is_invalid() {
+            eprintln!("window handle `{hwnd:?}` is invalid!");
+            None
+        } else {
+            unsafe {
                 // SAFETY:
                 //  - hwnd is a valid handle
-                NonNull::new(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut ViewState)
+                get_view_state(hwnd)
             }
         },
     };
@@ -66,33 +65,43 @@ pub(crate) unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w_param: WPARAM,
             }
         }
         WM_SIZE => {
-            if let Some(view_state) = view_state {
-                let resize = match w_param.0.max(10) as u32 {
-                    windows::Win32::UI::WindowsAndMessaging::SIZE_RESTORED => Resize::Restore(0, 0),
-                    windows::Win32::UI::WindowsAndMessaging::SIZE_MINIMIZED => Resize::Maximize,
-                    windows::Win32::UI::WindowsAndMessaging::SIZE_MAXIMIZED => Resize::Maximize,
-                    windows::Win32::UI::WindowsAndMessaging::SIZE_MAXHIDE => Resize::MaxHide,
-                    windows::Win32::UI::WindowsAndMessaging::SIZE_MAXSHOW => Resize::MaxShow(0, 0),
-                    _ => unreachable!("`w_param` should only have a value in `0..5`."),
-                };
-
-                println!("{resize:?}");
-
-                unsafe {
-                    // SAFETY:
-                    //  - hwnd is a valid handle
-                    //  - view_state is initialized as a valid ViewState
-                    match self::resize(hwnd, resize, view_state) {
-                        Ok(()) => OK,
-                        Err(_) => LRESULT(-1),
-                    }
-                }
-            } else {
-                unsafe {
+            let Some(view_state) = view_state else {
+                return unsafe {
                     // SAFETY: parameters are given as is => they are all valid
                     DefWindowProcW(hwnd, msg, w_param, l_param)
                 }
+            };
+
+            let resize = match w_param.0.max(10) as u32 {
+                windows::Win32::UI::WindowsAndMessaging::SIZE_RESTORED => Resize::Restore(0, 0),
+                windows::Win32::UI::WindowsAndMessaging::SIZE_MINIMIZED => Resize::Maximize,
+                windows::Win32::UI::WindowsAndMessaging::SIZE_MAXIMIZED => Resize::Maximize,
+                windows::Win32::UI::WindowsAndMessaging::SIZE_MAXHIDE => Resize::MaxHide,
+                windows::Win32::UI::WindowsAndMessaging::SIZE_MAXSHOW => Resize::MaxShow(0, 0),
+                _ => unreachable!("`w_param` should only have a value in `0..5`."),
+            };
+
+            println!("{resize:?}");
+
+            unsafe {
+                // SAFETY:
+                //  - hwnd is a valid handle
+                //  - view_state is initialized as a valid ViewState
+                match self::resize(hwnd, resize, view_state) {
+                    Ok(()) => OK,
+                    Err(_) => LRESULT(-1),
+                }
             }
+        }
+        WM_GETMINMAXINFO => {
+            let Some(view_state) = view_state else {
+                return OK
+            };
+
+            // "SAFETY": l_param is guaranteed to be a pointer to MINMAXINFO
+            let minmaxinfo = l_param.0 as *mut MINMAXINFO;
+
+            OK
         }
         WM_DESTROY => {
             unsafe {

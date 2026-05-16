@@ -5,7 +5,7 @@ use raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle, HasWindowH
 use crate::{
     kurbo::{Point, Size},
     platform::view::{RosinView, ThreadLockedView},
-    prelude::*,
+    prelude::*, win::view::f64_to_i32,
 };
 
 pub(crate) struct WindowHandle {
@@ -69,7 +69,7 @@ impl WindowHandle {
                 };
 
                 let scale_factor = desktop_dpi / view_dpi;
-                
+
                 unsafe {
                     // SAFETY:
                     //  - view.hwnd() is a valid window handle
@@ -78,7 +78,7 @@ impl WindowHandle {
                         eprintln!("`get_logical_size` {err}: {err:#?}");
                     }
                 }
-                
+
                 Size::new(
                     (rect.right - rect.left) as f64 * scale_factor,
                     (rect.bottom - rect.top) as f64 * scale_factor,
@@ -94,7 +94,7 @@ impl WindowHandle {
         self.view.block_on_thread(
             |view| {
                 let mut rect: RECT = Default::default();
-                
+
                 unsafe {
                     // SAFETY:
                     //  - view.hwnd() is a valid window handle
@@ -103,7 +103,7 @@ impl WindowHandle {
                         eprintln!("`get_logical_size` {err}: {err:#?}");
                     }
                 }
-                
+
                 Size::new(
                     (rect.right - rect.left) as f64,
                     (rect.bottom - rect.top) as f64,
@@ -145,9 +145,59 @@ impl WindowHandle {
 
     pub fn request_exit(&self) {}
 
-    pub fn set_max_size(&self, _size: Option<impl Into<Size>>) {}
+    pub fn set_max_size(&self, size: Option<impl Into<Size>>) {
+        let size = size.map(Into::into);
 
-    pub fn set_min_size(&self, _size: Option<impl Into<Size>>) {}
+        self.view.queue_on_thread(
+            move |view| {
+                use crate::platform::view::ViewStateSize;
+
+                let Some(view_state) = view.get_view_state() else {
+                    return
+                };
+
+                let max_size = match size {
+                    Some(size) => ViewStateSize {
+                        x: f64_to_i32(size.width),
+                        y: f64_to_i32(size.height),
+                    },
+                    None => ViewStateSize::default_max(),
+                };
+
+                unsafe {
+                    // SAFETY: view_state points to a valid ViewState
+                    (*view_state.as_ptr()).size_bounds.max = max_size
+                }
+            }
+        )
+    }
+
+    pub fn set_min_size(&self, size: Option<impl Into<Size>>) {
+        let size = size.map(Into::into);
+
+        self.view.queue_on_thread(
+            move |view| {
+                use crate::platform::view::ViewStateSize;
+
+                let Some(view_state) = view.get_view_state() else {
+                    return
+                };
+
+                let min_size = match size {
+                    Some(size) => ViewStateSize {
+                        x: f64_to_i32(size.width),
+                        y: f64_to_i32(size.height),
+                    },
+                    None => ViewStateSize::default_min(),
+                };
+
+                unsafe {
+                    // SAFETY: view_state points to a valid ViewState
+                    (*view_state.as_ptr()).size_bounds.min = min_size
+                }
+            }
+        )
+    }
 
     pub fn set_position(&self, position: impl Into<Point>) {
         use crate::platform::view::f64_to_i32;
@@ -163,8 +213,14 @@ impl WindowHandle {
                 //  - view.hwnd() is a valid handle
                 //  - None is a valid optional handle
                 //  - SWP_ASYNCWINDOWPOS, SWP_NOSIZE and SWP_NOZORDER are a valid value when xor'ed
-                let _res =
-                    SetWindowPos(view.hwnd(), None, f64_to_i32(position.x), f64_to_i32(position.y), 0, 0, SWP_ASYNCWINDOWPOS | SWP_NOSIZE | SWP_NOZORDER);
+                let _res = SetWindowPos(
+                    view.hwnd(),
+                    None,
+                    f64_to_i32(position.x),
+                    f64_to_i32(position.y),
+                    0, 0,
+                    SWP_ASYNCWINDOWPOS | SWP_NOSIZE | SWP_NOZORDER
+                );
 
                 #[cfg(debug_assertions)]
                 if let Err(err) = _res {

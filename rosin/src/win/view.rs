@@ -430,8 +430,17 @@ impl RosinView {
         Ok(view)
     }
 
+    /// Guaranteed to give a valid handle
     pub fn hwnd(&self) -> HWND {
         self.hwnd
+    }
+
+    /// Guaranteed to give a valid ViewState when called
+    pub fn get_view_state(&self) -> Option<std::ptr::NonNull<ViewState>> {
+        unsafe {
+            // SAFETY: self.hwnd() is guaranteed to give a valid handle
+            get_view_state(self.hwnd())
+        }
     }
 
     pub fn set_input_handler(&self, _id: Option<NodeId>, _handler: Option<Box<dyn InputHandler + Send + Sync>>) {}
@@ -549,10 +558,46 @@ impl Drop for RosinView {
 
 use windows::Win32::Graphics::Direct2D::{D2D1_FACTORY_TYPE_MULTI_THREADED, D2D1CreateFactory, ID2D1Factory8, ID2D1HwndRenderTarget};
 
+pub(crate) struct ViewStateSize {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl ViewStateSize {
+    pub fn default_max() -> Self {
+        ViewStateSize {
+            x: todo!(),
+            y: todo!(),
+        }
+    }
+
+    pub fn default_min() -> Self {
+        ViewStateSize {
+            x: todo!(),
+            y: todo!(),
+        }
+    }
+}
+
+pub(crate) struct ViewStateSizeBounds {
+    pub min: ViewStateSize,
+    pub max: ViewStateSize,
+}
+
+impl Default for ViewStateSizeBounds {
+    fn default() -> Self {
+        ViewStateSizeBounds {
+            min: ViewStateSize::default_min(),
+            max: ViewStateSize::default_max(),
+        }
+    }
+}
+
 #[repr(C)]
 pub(crate) struct ViewState {
     pub factory: ID2D1Factory8,
     pub render_target: Option<ID2D1HwndRenderTarget>,
+    pub size_bounds: ViewStateSizeBounds,
 }
 
 impl ViewState {
@@ -562,7 +607,7 @@ impl ViewState {
             D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED, None)?
         };
 
-        Ok(ViewState { factory, render_target: None })
+        Ok(ViewState { factory, render_target: None, size_bounds: ViewStateSizeBounds::default() })
     }
 
     /// Initalizes all the state
@@ -632,5 +677,18 @@ fn size_of_rect(rect: RECT) -> D2D_SIZE_U {
     D2D_SIZE_U {
         width: (rect.right - rect.left) as u32,
         height: i32::abs(rect.top - rect.bottom) as u32,
+    }
+}
+
+/// SAFETY: hwnd must be a handle to a valid window
+pub unsafe fn get_view_state(hwnd: HWND) -> Option<std::ptr::NonNull<ViewState>> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW,
+        GWLP_USERDATA,
+    };
+
+    unsafe {
+        // SAFETY: hwnd is valid
+        std::ptr::NonNull::new(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut ViewState)
     }
 }
