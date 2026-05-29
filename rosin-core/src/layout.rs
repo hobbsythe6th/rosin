@@ -601,8 +601,7 @@ fn measure_node<S, H>(ctx: &mut LayoutCtx<'_, S>, tree: &'_ Ui<S, H>, idx: usize
             let mut final_layout = None;
             let deps = DependencyMap::default().read_scope(|| {
                 if let Some(resolved) = text.resolve(ctx.translation_map) {
-                    let mut layout = text::layout_text(&font_style, max_width, &resolved);
-                    layout.break_all_lines(max_width);
+                    let layout = text::layout_text(&font_style, max_width, &resolved);
                     final_layout = Some(layout);
                 }
             });
@@ -974,10 +973,7 @@ pub(crate) fn align_and_position_text(style: &Style, rect: &RoundedRect, layout:
     let padding_box = padding_box(style, rect);
     let padding_box_w = padding_box.width() as f32;
     let padding_box_h = padding_box.height() as f32;
-
-    let text_w = layout.width();
-    let text_h = layout.height();
-
+    
     // Solve X Axis
     let mut x_items = [
         StretchItem::edge_space(Axis::X, Edge::Before, &Style::default(), style),
@@ -985,10 +981,14 @@ pub(crate) fn align_and_position_text(style: &Style, rect: &RoundedRect, layout:
         StretchItem::edge_space(Axis::X, Edge::After, &Style::default(), style),
     ];
     x_items[1].position = Position::ParentDirected;
-    x_items[1].basis = text_w;
+    x_items[1].basis = layout.width();
     solve(&mut x_items, padding_box_w);
-    let left = x_items[0].target;
 
+    // align text to remaining width after resolving stretch units, if any
+    let left = x_items[0].target;
+    let right = x_items[2].target;
+    let content_w = (padding_box_w - left - right).max(0.0);
+    layout.break_all_lines(Some(content_w));
     layout.align(style.text_align.into(), AlignmentOptions::default());
 
     // Solve Y Axis
@@ -998,9 +998,9 @@ pub(crate) fn align_and_position_text(style: &Style, rect: &RoundedRect, layout:
         StretchItem::edge_space(Axis::Y, Edge::After, &Style::default(), style),
     ];
     y_items[1].position = Position::ParentDirected;
-    y_items[1].basis = text_h;
-
+    y_items[1].basis = layout.height();
     solve(&mut y_items, padding_box_h);
+
     let top = y_items[0].target;
 
     Point::new(padding_box.x0 + left as f64, padding_box.y0 + top as f64)
