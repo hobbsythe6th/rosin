@@ -987,12 +987,9 @@ pub(crate) fn align_and_position_text(style: &Style, rect: &RoundedRect, layout:
     x_items[1].position = Position::ParentDirected;
     x_items[1].basis = text_w;
     solve(&mut x_items, padding_box_w);
-
-    // align text to remaining width after resolving stretch units, if any
     let left = x_items[0].target;
-    let right = x_items[2].target;
-    let content_w = (padding_box_w - left - right).max(0.0);
-    layout.align(Some(content_w), style.text_align.into(), AlignmentOptions::default());
+
+    layout.align(style.text_align.into(), AlignmentOptions::default());
 
     // Solve Y Axis
     let mut y_items = [
@@ -1004,7 +1001,6 @@ pub(crate) fn align_and_position_text(style: &Style, rect: &RoundedRect, layout:
     y_items[1].basis = text_h;
 
     solve(&mut y_items, padding_box_h);
-
     let top = y_items[0].target;
 
     Point::new(padding_box.x0 + left as f64, padding_box.y0 + top as f64)

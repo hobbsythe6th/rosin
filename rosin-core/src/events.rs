@@ -184,7 +184,7 @@ impl<'a> CanvasCtx<'a> {
     pub fn draw_text_at_origin(&mut self, origin: Point, max_width: impl Into<Option<f32>>, text: &str) {
         let max_width = max_width.into();
         let mut layout = text::layout_text(&self.style.get_font_layout_style(), max_width, text);
-        layout.align(max_width, self.style.text_align.into(), AlignmentOptions::default());
+        layout.align(self.style.text_align.into(), AlignmentOptions::default());
         text::draw_text(self.scene, self.style, origin, &layout);
     }
 

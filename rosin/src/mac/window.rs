@@ -182,6 +182,7 @@ pub(crate) fn create_window<S: Sync + 'static>(
 
     let handle = crate::platform::handle::WindowHandle::new(mtm, ns_view.clone());
     *view_ivars(&ns_view).handle.borrow_mut() = Some(WindowHandle(handle));
+    view_ivars(&ns_view).viewport.borrow_mut().init_viewport(&ns_view);
 
     if let Some(menu) = &desc.menu {
         ns_view.set_main_menu(Some(menu.clone()));
@@ -212,14 +213,16 @@ pub(crate) fn create_window<S: Sync + 'static>(
         let run_loop = NSRunLoop::mainRunLoop();
         let anim = ns_view.displayLinkWithTarget_selector(&ns_view, sel!(anim_frame:));
         anim.addToRunLoop_forMode(&run_loop, NSRunLoopCommonModes);
-        anim.setPaused(true);
+
+        // TODO - set to false as a hack to get the first frame to render, since WGPU v29 returns Occluded causing update_layer to return early.
+        // see https://github.com/gfx-rs/wgpu/issues/9430
+        anim.setPaused(false);
+        *view_ivars(&ns_view).display_link.borrow_mut() = Some(anim);
 
         if cfg!(debug_assertions) {
             let reload = NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(1.0 / 5.0, &ns_view, sel!(reload_assets), None, true);
             *view_ivars(&ns_view).reload_timer.borrow_mut() = Some(reload);
         };
-
-        *view_ivars(&ns_view).display_link.borrow_mut() = Some(anim);
     }
 }
 
@@ -313,6 +316,7 @@ pub(crate) struct ViewportContainer<'a, S: Sync + 'static> {
 }
 
 pub(crate) trait ViewportTrait {
+    fn init_viewport(&mut self, view: &RosinView);
     fn create_window(&mut self, mtm: MainThreadMarker, view: &RosinView, desc: Box<dyn Any + Send + Sync>);
     fn dispatch_and_redraw(&mut self, view: &RosinView);
     fn anim_frame(&mut self, view: &RosinView);
@@ -338,6 +342,17 @@ pub(crate) trait ViewportTrait {
 }
 
 impl<'a, S: Sync + 'static> ViewportTrait for ViewportContainer<'a, S> {
+    fn init_viewport(&mut self, view: &RosinView) {
+        let handle_ref = view_ivars(view).handle.borrow();
+        let Some(handle) = handle_ref.as_ref() else {
+            return;
+        };
+
+        let mut state = self.app_state.borrow_mut();
+        let _ = self.viewport.frame(&*state);
+        self.viewport.dispatch_event_queue(&mut state, handle);
+    }
+
     fn create_window(&mut self, mtm: MainThreadMarker, view: &RosinView, desc: Box<dyn Any + Send + Sync>) {
         let desc: Box<WindowDesc<S>> = match desc.downcast::<WindowDesc<S>>() {
             Ok(desc) => desc,
@@ -390,7 +405,7 @@ impl<'a, S: Sync + 'static> ViewportTrait for ViewportContainer<'a, S> {
         let deps_changed = self.wgpu_deps.as_ref().is_some_and(|d| d.any_changed());
         self.wgpu_deps_changed = deps_changed;
 
-        if !self.viewport.is_idle() || deps_changed {
+        if !self.viewport.is_idle() || deps_changed || view_ivars(view).needs_config.get() {
             view.request_redraw();
         }
     }
@@ -467,7 +482,7 @@ impl<'a, S: Sync + 'static> ViewportTrait for ViewportContainer<'a, S> {
             unsafe {
                 if let Some(hal_surface) = surface.as_hal::<wgpu::hal::api::Metal>() {
                     let guard = hal_surface.render_layer().lock();
-                    guard.set_presents_with_transaction(true);
+                    guard.setPresentsWithTransaction(true);
                 }
             }
 
@@ -527,13 +542,9 @@ impl<'a, S: Sync + 'static> ViewportTrait for ViewportContainer<'a, S> {
         }
 
         let surface_texture = match surface.get_current_texture() {
-            Ok(tex) => tex,
-            Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost | wgpu::SurfaceError::Timeout | wgpu::SurfaceError::Other) => {
+            wgpu::CurrentSurfaceTexture::Success(tex) | wgpu::CurrentSurfaceTexture::Suboptimal(tex) => tex,
+            _ => {
                 view_ivars(view).needs_config.set(true);
-                return;
-            }
-            Err(wgpu::SurfaceError::OutOfMemory) => {
-                error!("wgpu out of memory");
                 return;
             }
         };
@@ -645,7 +656,7 @@ impl<'a, S: Sync + 'static> ViewportTrait for ViewportContainer<'a, S> {
 
                 let pipeline_layout = gpu_ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("Rosin Compositor Pipeline Layout"),
-                    bind_group_layouts: &[&layout],
+                    bind_group_layouts: &[Some(&layout)],
                     immediate_size: 0,
                 });
 

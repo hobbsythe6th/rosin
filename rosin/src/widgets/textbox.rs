@@ -8,7 +8,7 @@ use crate::{
     accesskit,
     kurbo::{Affine, Point, Rect},
     parley::{
-        self, FontStack, FontWeight, FontWidth,
+        self, FontFamily, FontWeight, FontWidth,
         editing::{Cursor, PlainEditor, Selection},
         layout::Affinity,
         style::StyleProperty,
@@ -508,7 +508,7 @@ impl TextBox {
                     let fallback = "'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Hiragino Kaku Gothic Pro', \
                     'Yu Gothic', 'YuGothic', 'Meiryo', system-ui, sans-serif";
                     let family = style.font_family.as_deref().unwrap_or(fallback);
-                    styles.insert(StyleProperty::FontStack(FontStack::Source(Cow::Owned(family.to_string()))));
+                    styles.insert(StyleProperty::FontFamily(FontFamily::Source(Cow::Owned(family.to_string()))));
                     styles.insert(StyleProperty::FontSize(style.font_size));
                     styles.insert(StyleProperty::FontWeight(FontWeight::new(style.font_weight)));
                     styles.insert(StyleProperty::FontStyle(style.font_style));

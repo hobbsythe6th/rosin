@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 use kurbo::Point;
 use parking_lot::RwLock;
-use parley::{FontContext, FontStack, Layout, LayoutContext, style::StyleProperty};
+use parley::{FontContext, FontFamily, Layout, LayoutContext, style::StyleProperty};
 use vello::{
     Scene,
     peniko::{self, Fill},
@@ -39,7 +39,7 @@ pub(crate) fn layout_text(style: &FontLayoutStyle, max_width: Option<f32>, text:
     };
 
     let mut builder = layout_cx.ranged_builder(&mut font_cx, text, 1.0, true);
-    builder.push_default(StyleProperty::FontStack(FontStack::Source(style.font_family.as_deref().map_or("system-ui", |family| family).into())));
+    builder.push_default(StyleProperty::FontFamily(FontFamily::Source(style.font_family.as_deref().map_or("system-ui", |family| family).into())));
     builder.push_default(StyleProperty::FontWeight(parley::style::FontWeight::new(style.font_weight)));
     builder.push_default(StyleProperty::LetterSpacing(style.letter_spacing.unwrap_or(Unit::Px(0.0)).definite_size(font_size, font_size)));
     builder.push_default(StyleProperty::WordSpacing(style.word_spacing.unwrap_or(Unit::Px(0.0)).definite_size(font_size, font_size)));

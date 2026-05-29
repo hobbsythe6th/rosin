@@ -145,10 +145,7 @@ impl<S: Sync + 'static> AppLauncher<S> {
 
         NSApp(mtm).activate();
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: self.wgpu_config.backends,
-            ..Default::default()
-        });
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let adapter = match instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: self.wgpu_config.power_preference,
