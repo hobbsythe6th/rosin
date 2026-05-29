@@ -623,3 +623,29 @@ impl TypeHash for rosin_core::kurbo::Vec2 {
         12530978722039632348
     }
 }
+
+impl TypeHash for rosin_core::kurbo::Point {
+    fn get_typehash(_: u64) -> u64 {
+        8912881235526481064
+    }
+}
+
+impl TypeHash for rosin_core::kurbo::BezPath {
+    fn get_typehash(_: u64) -> u64 {
+        24325923567213876
+    }
+}
+
+impl TypeHash for rosin_core::kurbo::Affine {
+    fn get_typehash(_: u64) -> u64 {
+        632083317191878773
+    }
+}
+
+impl TypeHash for rosin_core::peniko::Color {
+    fn get_typehash(_: u64) -> u64 {
+        4923461720253736637
+    }
+}
+
+// TODO - more (all?) kurbo types

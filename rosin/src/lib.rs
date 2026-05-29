@@ -108,10 +108,8 @@ pub mod gpu;
 pub mod handle;
 pub mod ime;
 pub mod menu;
-pub mod widgets;
-
-#[cfg(all(feature = "hot-reload", debug_assertions))]
 pub mod typehash;
+pub mod widgets;
 
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
@@ -181,12 +179,10 @@ pub mod prelude {
 
     pub use crate::keyboard_types::*;
     pub use crate::parley::editing::Cursor;
-
-    #[cfg(all(feature = "hot-reload", debug_assertions))]
-    pub use rosin_derive::*;
-
-    #[cfg(all(feature = "hot-reload", debug_assertions))]
     pub use crate::typehash::TypeHash;
+
+    #[cfg(feature = "hot-reload")]
+    pub use rosin_derive::*;
 
     #[cfg(feature = "icu")]
     pub use crate::time::{Date, OffsetDateTime, Time};
