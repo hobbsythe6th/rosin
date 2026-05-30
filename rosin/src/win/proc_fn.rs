@@ -16,8 +16,19 @@ pub(crate) unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w_param: WPARAM,
     let view_state = match msg {
         WM_NCCREATE => {
             return unsafe {
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    CREATESTRUCTW,
+                    SetWindowLongPtrW,
+                    GWLP_USERDATA,
+                };
                 #[cfg(debug_assertions)]
                 println!("Creating window `{hwnd:?}`");
+
+                // Guaranteed to get a CREATESTRUCT
+                let create_struct = (l_param.0 as *const CREATESTRUCTW).as_ref().unwrap_unchecked();
+
+                // SAFETY: parameters are given as is => they are all valid
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, create_struct.lpCreateParams as isize);
 
                 // SAFETY: parameters are given as is => they are all valid
                 DefWindowProcW(hwnd, msg, w_param, l_param)
@@ -64,6 +75,7 @@ pub(crate) unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w_param: WPARAM,
                 Err(_) => LRESULT(-1),
             }
         }
+        #[cfg(false)] 
         WM_SIZE => {
             let Some(view_state) = view_state else {
                 return unsafe {
@@ -95,11 +107,32 @@ pub(crate) unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w_param: WPARAM,
         }
         WM_GETMINMAXINFO => {
             let Some(view_state) = view_state else {
-                return OK
+                return OK;
             };
 
-            // "SAFETY": l_param is guaranteed to be a pointer to MINMAXINFO
-            let minmaxinfo = l_param.0 as *mut MINMAXINFO;
+            let minmaxinfo = unsafe {
+                // SAFETY: l_param is guaranteed to be a pointer to MINMAXINFO
+                NonNull::new_unchecked(l_param.0 as *mut MINMAXINFO).as_mut()
+            };
+
+            let view_state = unsafe {
+                // SAFETY: View state is initialized
+                view_state.as_ref()
+            };
+
+            #[cfg(debug_assertions)]
+            println!(
+                "CURRENT MIN/MAX SIZE:\n\tmax.x = {max_x}\n\tmax.y = {max_y}\n\tmin.x = {min_x}\n\tmin.y = {min_y}",
+                max_x = minmaxinfo.ptMaxTrackSize.x,
+                max_y = minmaxinfo.ptMaxTrackSize.y,
+                min_y = minmaxinfo.ptMinTrackSize.y,
+                min_x = minmaxinfo.ptMinTrackSize.x,
+            );
+
+            minmaxinfo.ptMaxTrackSize.x = view_state.size_bounds.max.x;
+            minmaxinfo.ptMaxTrackSize.y = view_state.size_bounds.max.y;
+            minmaxinfo.ptMinTrackSize.y = view_state.size_bounds.min.y;
+            minmaxinfo.ptMinTrackSize.x = view_state.size_bounds.min.x;
 
             OK
         }

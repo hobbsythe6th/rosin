@@ -100,18 +100,18 @@ impl<S: Sync + 'static> AppLauncher<S> {
 
         let mut message = MSG::default();
 
-        println!("\nStarting Rosin Loop...");
+        #[cfg(false)] println!("\nStarting Rosin Loop...");
 
         // TODO decide: how threading works here (since windows *can* come from diferent threads)
         loop {
-            println!("\nInitializing new message...");
+            #[cfg(false)] println!("\nInitializing new message...");
 
             let result = unsafe { GetMessageW(&raw mut message, None, 0, 0) };
 
-            println!("{result:?}; {message:?}");
+            #[cfg(false)] println!("{result:?}; {message:?}");
 
             if result.0 <= 0 {
-                eprintln!("WARNING: The current implementation may stop the loop and may stop the program once one window closes");
+                #[cfg(false)] eprintln!("WARNING: The current implementation may stop the loop and may stop the program once one window closes");
                 match result.0 {
                     0 => println!("\nStoping Rosin Loop..."),
                     code => {

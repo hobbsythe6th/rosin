@@ -42,6 +42,7 @@ enum ActionBlock {
     Empty,
 }
 
+#[allow(unused)]
 impl ActionBlock {
     fn is_empty(&self) -> bool {
         matches!(self, ActionBlock::Empty)
@@ -314,7 +315,12 @@ fn menu(desc: &MenuDesc, translation_map: &TranslationMap) -> Result<HMENU, Erro
 
 // TODO: implement all the unused (menu) stuff
 impl RosinView {
-    pub fn from_new_window<S: 'static>(desc: &WindowDesc<S>, instance: Option<HINSTANCE>, parent: Option<WindowHandle>, translation_map: &TranslationMap) -> Result<RosinView, Error> {
+    pub fn from_new_window<S: 'static>(
+        desc: &WindowDesc<S>,
+        instance: Option<HINSTANCE>,
+        parent: Option<WindowHandle>,
+        translation_map: &TranslationMap
+    ) -> Result<RosinView, Error> {
         use windows::Win32::UI::WindowsAndMessaging::{
             WINDOW_STYLE,
 
@@ -358,16 +364,13 @@ impl RosinView {
             (x, y)
         };
 
-        let view_state = Box::new(ViewState::new());
+        let view_state = Box::new(ViewState::new(desc.min_size, desc.max_size));
 
         let menu = desc
             .menu
             .as_ref()
             .map(|desc| menu(desc, translation_map))
-            .transpose()
-            .unwrap_or_else(
-            |err| todo!("handling failure to create menu gracefully (aka returning an error).\n > \"{err}\" : {err:#?}")
-        );
+            .transpose()?;
 
         let window_style = {
             let mut window_style = WS_CAPTION | WS_SYSMENU;
@@ -390,6 +393,8 @@ impl RosinView {
 
             window_style
         };
+
+        println!("State Pointer Adress: {view_state:p}");
 
         // I tried looking for another safe
         // or at least safer api for creating a window,
@@ -415,6 +420,9 @@ impl RosinView {
                     Some(parent.map(|handle| handle.0.view.view.hwnd).unwrap_or(desktop)),
                     menu,
                     instance,
+                    // NOTE: This is given to the actual handle only *after* WM_CREATE or WM_NCCREATE is processed
+                    //       (I don't remember which, they are both processed early on but neather
+                    //       is guaranteed to be processed before anything else, and from testing they are not)
                     Some(Box::leak(view_state) as *mut _ as *const _),
                 )?
             },
@@ -443,50 +451,7 @@ impl RosinView {
         }
     }
 
-    pub fn set_input_handler(&self, _id: Option<NodeId>, _handler: Option<Box<dyn InputHandler + Send + Sync>>) {}
-
-    pub fn get_logical_size(&self) -> Size {
-        Size::ZERO
-    }
-
-    pub fn get_physical_size(&self) -> Size {
-        Size::ZERO
-    }
-
-    pub fn get_position(&self) -> Point {
-        Point::ZERO
-    }
-
-    pub fn get_window_state(&self) -> WindowState {
-        WindowState::Normal
-    }
-
-    pub fn is_active(&self) -> bool {
-        true
-    }
-
-    pub fn activate(&self) {}
-
-    pub fn deactivate(&self) {}
-
-    pub fn set_menu(&self, _menu: impl Into<Option<MenuDesc>>) {}
-
-    pub fn show_context_menu(&self, _node: Option<NodeId>, _menu: MenuDesc, _pos: Point) {}
-
-    pub fn create_window<S: Any + Sync + 'static>(&self, _desc: &WindowDesc<S>) {}
-
-    pub fn request_close(&self) {}
-
-    pub fn request_exit(&self) {}
-
-    pub fn set_max_size(&self, _size: Option<impl Into<Size>>) {}
-
-    pub fn set_min_size(&self, _size: Option<impl Into<Size>>) {}
-
-    pub fn set_resizable(&self, _resizeable: bool) {}
-
-    pub fn set_title(&self, _title: impl Into<String>) {}
-
+    #[deprecated = "To move functionality into WindowHandle's method"]
     pub fn minimize(&self) {
         use windows::Win32::UI::WindowsAndMessaging::SW_MINIMIZE;
 
@@ -496,6 +461,7 @@ impl RosinView {
         }
     }
 
+    #[deprecated = "To move functionality into WindowHandle's method"]
     pub fn maximize(&self) {
         use windows::Win32::UI::WindowsAndMessaging::SW_MAXIMIZE;
 
@@ -505,6 +471,7 @@ impl RosinView {
         }
     }
 
+    #[deprecated = "To move functionality into WindowHandle's method"]
     pub fn restore(&self) {
         use windows::Win32::UI::WindowsAndMessaging::SW_RESTORE;
 
@@ -512,32 +479,6 @@ impl RosinView {
             // SAFETY: all given values are valid
             let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindowAsync(self.hwnd(), SW_RESTORE);
         }
-    }
-
-    pub fn set_cursor(&self, _cursor: CursorType) {}
-
-    pub fn hide_cursor(&self) {}
-
-    pub fn unhide_cursor(&self) {}
-
-    pub fn set_clipboard_text(&self, _text: &str) {}
-
-    pub fn get_clipboard_text(&self) -> Option<String> {
-        None
-    }
-
-    pub fn open_url(&self, _url: &str) {}
-
-    pub fn open_file_dialog(&self, _node: Option<NodeId>, _options: FileDialogOptions) {}
-
-    pub fn save_file_dialog(&self, _node: Option<NodeId>, _options: FileDialogOptions) {}
-
-    pub fn timer(&self, _node: Option<NodeId>, _delay: Duration) {}
-
-    pub fn alert<C>(&self, _node: Option<NodeId>, _png_bytes: Option<&'static [u8]>, _title: &str, _details: &str, _options: &[(&'static str, C)])
-    where
-        C: Into<CommandId> + Copy,
-    {
     }
 }
 
@@ -556,25 +497,34 @@ impl Drop for RosinView {
     }
 }
 
-use windows::Win32::Graphics::Direct2D::{D2D1_FACTORY_TYPE_MULTI_THREADED, D2D1CreateFactory, ID2D1Factory8, ID2D1HwndRenderTarget};
 
+#[derive(Clone, Copy)]
 pub(crate) struct ViewStateSize {
     pub x: i32,
     pub y: i32,
 }
 
 impl ViewStateSize {
-    pub fn default_max() -> Self {
+    pub fn from_size(size: Size) -> Self {
         ViewStateSize {
-            x: todo!(),
-            y: todo!(),
+            x: f64_to_i32(size.width),
+            y: f64_to_i32(size.height),
+        }
+    }
+    
+    pub fn default_max() -> Self {
+        // I did not verify if these are the actual values.
+        ViewStateSize {
+            x: i32::MAX,
+            y: i32::MAX,
         }
     }
 
     pub fn default_min() -> Self {
         ViewStateSize {
-            x: todo!(),
-            y: todo!(),
+            // **I DID NOT VERIFY IF THIS IS THE ACTUAL DEFAULT VALUE.**
+            x: 32,
+            y: 0,
         }
     }
 }
@@ -584,14 +534,7 @@ pub(crate) struct ViewStateSizeBounds {
     pub max: ViewStateSize,
 }
 
-impl Default for ViewStateSizeBounds {
-    fn default() -> Self {
-        ViewStateSizeBounds {
-            min: ViewStateSize::default_min(),
-            max: ViewStateSize::default_max(),
-        }
-    }
-}
+use windows::Win32::Graphics::Direct2D::{D2D1_FACTORY_TYPE_MULTI_THREADED, D2D1CreateFactory, ID2D1Factory8, ID2D1HwndRenderTarget};
 
 #[repr(C)]
 pub(crate) struct ViewState {
@@ -601,13 +544,24 @@ pub(crate) struct ViewState {
 }
 
 impl ViewState {
-    fn new() -> Result<Self, Error> {
+    fn new(min_size: Option<Size>, max_size: Option<Size>) -> Result<Self, Error> {
         let factory = unsafe {
             // SAFETY: all inputs are valid
             D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED, None)?
         };
 
-        Ok(ViewState { factory, render_target: None, size_bounds: ViewStateSizeBounds::default() })
+        let size_bounds = ViewStateSizeBounds {
+            min: min_size.map(ViewStateSize::from_size).unwrap_or_else(ViewStateSize::default_min),
+            max: max_size.map(ViewStateSize::from_size).unwrap_or_else(ViewStateSize::default_max),
+        };
+
+        Ok(
+            ViewState {
+                factory,
+                render_target: None,
+                size_bounds: size_bounds,
+            }
+        )
     }
 
     /// Initalizes all the state
