@@ -94,6 +94,7 @@ impl ThreadLockedView {
         }
     }
 
+    // TODO More testing when able
     /// Tries to execute immidietly
     ///
     /// Returns [`None`] if it's not found on the original thread
@@ -114,6 +115,7 @@ impl ThreadLockedView {
         f(&self.view)
     }
 
+    // TODO More testing when able
     pub fn queue_on_thread<F>(&self, f: F)
     where
         F: FnOnce(&RosinView) + Send + 'static,
@@ -130,12 +132,30 @@ impl ThreadLockedView {
                 func(&self.view)
             }
 
+            std::mem::drop(queue);
+
+            let mut blocks = self
+                .action_blocks
+                .lock()
+                .expect("Can not do anything if the `action_blocks` is poisoned except *maybe* recover it?");
+
+            for action in blocks.iter_mut() {
+                if !action.is_uncalled() {
+                    continue
+                };
+                let ActionBlock::Uncalled(thread_id, func) = std::mem::replace(action, ActionBlock::Empty) else {
+                    unreachable!("`block_on_thread`: We already sucsesfully checked that action is uncalled")
+                };
+                *action = ActionBlock::Called(thread_id, func(&self.view))
+            }
+
             f(&self.view)
         } else {
             queue.push_back(Box::new(f))
         }
     }
 
+    // TODO More testing when able
     // could this be done better with async?
     pub fn block_on_thread<F, R>(&self, f: F) -> R
     where
@@ -158,6 +178,17 @@ impl ThreadLockedView {
                     unreachable!("`block_on_thread`: We already sucsesfully checked that action is uncalled")
                 };
                 *action = ActionBlock::Called(thread_id, func(&self.view))
+            }
+
+            std::mem::drop(blocks);
+
+            let mut queue = self
+                .action_queue
+                .lock()
+                .expect("Can not do anything if the `action_queue` is poisoned except *maybe* recover it?");
+
+            for func in queue.drain(..) {
+                func(&self.view)
             }
 
             return f(&self.view);
