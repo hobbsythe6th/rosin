@@ -1,15 +1,15 @@
 
-use std::{any::Any, time::Duration, collections::VecDeque, sync::Mutex};
+use std::{any::Any, collections::VecDeque, sync::Mutex};
 
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Foundation::{HINSTANCE, HWND};
 use windows::Win32::Graphics::Direct2D::Common::D2D_SIZE_U;
 use windows::Win32::System::Threading::GetCurrentThreadId;
-use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetDesktopWindow, GetWindowRect, GetWindowThreadProcessId, HMENU, SW_NORMAL, ShowWindowAsync};
+use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetDesktopWindow, GetWindowRect, GetWindowThreadProcessId, SW_NORMAL, ShowWindowAsync};
 use windows::core::Error;
 
 use crate::{
-    kurbo::{Point, Size},
+    kurbo::Size,
     prelude::*,
 };
 
@@ -219,6 +219,8 @@ pub(crate) fn f64_to_i32(f: f64) -> i32 {
     f as i32
 }
 
+/// Unsure if this is correct. I highly recommend just deleting this function
+#[cfg(false)]
 fn menu(desc: &MenuDesc, translation_map: &TranslationMap) -> Result<HMENU, Error> {
     use crate::menu::{
         MenuItem,
@@ -319,11 +321,9 @@ impl RosinView {
         desc: &WindowDesc<S>,
         instance: Option<HINSTANCE>,
         parent: Option<WindowHandle>,
-        translation_map: &TranslationMap
+        _translation_map: &TranslationMap
     ) -> Result<RosinView, Error> {
         use windows::Win32::UI::WindowsAndMessaging::{
-            WINDOW_STYLE,
-
             WS_EX_OVERLAPPEDWINDOW,
             WS_CAPTION,
             WS_SYSMENU,
@@ -366,6 +366,7 @@ impl RosinView {
 
         let view_state = Box::new(ViewState::new(desc.min_size, desc.max_size));
 
+        #[cfg(false)]
         let menu = desc
             .menu
             .as_ref()
@@ -418,7 +419,7 @@ impl RosinView {
                     width,
                     height,
                     Some(parent.map(|handle| handle.0.view.view.hwnd).unwrap_or(desktop)),
-                    menu,
+                    None, // menu,
                     instance,
                     // NOTE: This is given to the actual handle only *after* WM_CREATE or WM_NCCREATE is processed
                     //       (I don't remember which, they are both processed early on but neather
@@ -537,6 +538,7 @@ impl ViewState {
     /// Initalizes all the state
     ///
     /// SAFETY: `hwnd` must be a valid handle
+    #[cfg(false)]
     #[allow(unsafe_op_in_unsafe_fn)]
     pub unsafe fn init(&mut self, hwnd: HWND) -> Result<(), Error> {
         debug_assert!(!hwnd.is_invalid(), "`hwnd` at this point should be a valid window handle");

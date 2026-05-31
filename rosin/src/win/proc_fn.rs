@@ -1,8 +1,8 @@
 use std::ptr::NonNull;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::Graphics::Gdi::{BeginPaint, COLOR_WINDOW, EndPaint, FillRect, HBRUSH, HDC, InvalidateRect, PAINTSTRUCT};
-use windows::Win32::UI::WindowsAndMessaging::{DefWindowProcW, PostQuitMessage, MINMAXINFO, WM_DESTROY, WM_NCCREATE, WM_PAINT, WM_SIZE, WM_GETMINMAXINFO};
+use windows::Win32::Graphics::Gdi::{BeginPaint, COLOR_WINDOW, EndPaint, FillRect, HBRUSH, HDC, /* InvalidateRect, */ PAINTSTRUCT};
+use windows::Win32::UI::WindowsAndMessaging::{DefWindowProcW, PostQuitMessage, MINMAXINFO, WM_DESTROY, WM_NCCREATE, WM_PAINT, /* WM_SIZE, */ WM_GETMINMAXINFO};
 use windows::core::{Error, PCWSTR, w};
 
 use crate::platform::view::{ViewState, get_view_state};
@@ -173,6 +173,8 @@ unsafe fn paint(hwnd: HWND, hdc: HDC, mut paint_struct: PAINTSTRUCT, mut state: 
     Ok(())
 }
 
+/*
+
 /// Helper enum for resizing a window
 #[repr(u32)]
 #[derive(Debug)]
@@ -234,10 +236,4 @@ unsafe fn resize(hwnd: HWND, _resize: Resize, state: NonNull<ViewState>) -> Resu
     Ok(())
 }
 
-// unsafe fn calculate_layout(render_target: NonNull<ID2D1HwndRenderTarget>) {
-//     let size = (*render_target.as_ptr()).GetSize();
-//     let x = size.width / 2.0;
-//     let y = size.height / 2.0;
-//     let radius = f32::min(x, y);
-//     ellipse = D2D1::Ellipse(D2D1::Point2F(x, y), radius, radius);
-// }
+*/
