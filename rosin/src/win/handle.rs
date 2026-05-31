@@ -324,21 +324,79 @@ impl WindowHandle {
         }
     }
 
-    pub fn set_cursor(&self, _cursor: CursorType) {
-        unsafe {
-            // TEMP SAFETY: read the **WIN32 THREAD SAFETY** comment from `.../rosin/src/win/mod.rs`
-            // FUTURE SAFETY: Gonna use async functions for queuing setting the cursor within the messege queue
-            // CURRENT SAFETY: nothing is done with `hwnd`
-            self.view.try_on_trust(|view| {
-                let hwnd = view.hwnd();
-                todo!("yet")
-            })
-        }
+    pub fn set_cursor(&self, cursor: CursorType) {
+        use windows::Win32::UI::WindowsAndMessaging::{HCURSOR, SetCursor};
+
+        self.view.queue_on_thread(
+            move |_| {
+                let handle_cursor: Option<HCURSOR> = match cursor {
+                    CursorType::Default => None,
+
+                    /*
+                    CursorType::ContextMenu => ...,
+                    CursorType::Help => ...,
+                    CursorType::Pointer => ...,
+
+                    CursorType::Cell => ...,
+                    CursorType::Crosshair => ...,
+                    CursorType::Text => ...,
+                    CursorType::VerticalText => ...,
+
+                    CursorType::Alias => ...,
+                    CursorType::Copy => ...,
+                    CursorType::Move => ...,
+                    CursorType::NotAllowed => ...,
+                    CursorType::Grab => ...,
+                    CursorType::Grabbing => ...,
+
+                    CursorType::ColResize => ...,
+                    CursorType::RowResize => ...,
+                    CursorType::NResize => ...,
+                    CursorType::EResize => ...,
+                    CursorType::SResize => ...,
+                    CursorType::WResize => ...,
+                    CursorType::NEResize => ...,
+                    CursorType::NWResize => ...,
+                    CursorType::SEResize => ...,
+                    CursorType::SWResize => ...,
+                    CursorType::EWResize => ...,
+                    CursorType::NSResize => ...,
+                    CursorType::NESWResize => ...,
+                    CursorType::NWSEResize => ...,
+
+                    CursorType::ZoomIn => ...,
+                    CursorType::ZoomOut => ...,
+                    */
+
+                    _ => todo!("handling the {cursor:?} cursor type."),
+                };
+
+                unsafe {
+                    SetCursor(handle_cursor);
+                }
+            }
+        )
     }
 
-    pub fn hide_cursor(&self) {}
+    pub fn hide_cursor(&self) {
+        use windows::Win32::UI::WindowsAndMessaging::ShowCursor;
 
-    pub fn unhide_cursor(&self) {}
+        self.view.queue_on_thread(
+            |_| unsafe {
+                ShowCursor(false);
+            }
+        )
+    }
+
+    pub fn unhide_cursor(&self) {
+        use windows::Win32::UI::WindowsAndMessaging::ShowCursor;
+
+        self.view.queue_on_thread(
+            |_| unsafe {
+                ShowCursor(true);
+            }
+        )
+    }
 
     pub fn set_clipboard_text(&self, _text: &str) {}
 
