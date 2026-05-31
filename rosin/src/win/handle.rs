@@ -283,21 +283,45 @@ impl WindowHandle {
     pub fn set_title(&self, _title: impl Into<String>) {}
 
     pub fn minimize(&self) {
-        self.view
-            .try_on_thread(RosinView::minimize)
-            .expect("Temporary crash fail when `minimize` is ran");
+        unsafe {
+            self.view
+                .try_on_trust(
+                    |view| {
+                        use windows::Win32::UI::WindowsAndMessaging::SW_MINIMIZE;
+    
+                        // SAFETY: all given values are valid
+                        let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindowAsync(view.hwnd(), SW_MINIMIZE);
+                    }
+                );
+        }
     }
 
     pub fn maximize(&self) {
-        self.view
-            .try_on_thread(RosinView::maximize)
-            .expect("Temporary crash fail when `minimize` is ran");
+        unsafe {
+            self.view
+                .try_on_trust(
+                    |view| {
+                        use windows::Win32::UI::WindowsAndMessaging::SW_MAXIMIZE;
+
+                        // SAFETY: all given values are valid
+                        let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindowAsync(view.hwnd(), SW_MAXIMIZE);
+                    }
+                );
+        }
     }
 
     pub fn restore(&self) {
-        self.view
-            .try_on_thread(RosinView::restore)
-            .expect("Temporary crash fail when `minimize` is ran");
+        unsafe {
+            self.view
+                .try_on_trust(
+                    |view| {
+                        use windows::Win32::UI::WindowsAndMessaging::SW_RESTORE;
+
+                        // SAFETY: all given values are valid
+                        let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindowAsync(view.hwnd(), SW_RESTORE);
+                    }
+                );
+        }
     }
 
     pub fn set_cursor(&self, _cursor: CursorType) {

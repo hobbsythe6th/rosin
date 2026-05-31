@@ -450,36 +450,6 @@ impl RosinView {
             get_view_state(self.hwnd())
         }
     }
-
-    #[deprecated = "To move functionality into WindowHandle's method"]
-    pub fn minimize(&self) {
-        use windows::Win32::UI::WindowsAndMessaging::SW_MINIMIZE;
-
-        unsafe {
-            // SAFETY: all given values are valid
-            let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindowAsync(self.hwnd(), SW_MINIMIZE);
-        }
-    }
-
-    #[deprecated = "To move functionality into WindowHandle's method"]
-    pub fn maximize(&self) {
-        use windows::Win32::UI::WindowsAndMessaging::SW_MAXIMIZE;
-
-        unsafe {
-            // SAFETY: all given values are valid
-            let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindowAsync(self.hwnd(), SW_MAXIMIZE);
-        }
-    }
-
-    #[deprecated = "To move functionality into WindowHandle's method"]
-    pub fn restore(&self) {
-        use windows::Win32::UI::WindowsAndMessaging::SW_RESTORE;
-
-        unsafe {
-            // SAFETY: all given values are valid
-            let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindowAsync(self.hwnd(), SW_RESTORE);
-        }
-    }
 }
 
 impl Drop for RosinView {
