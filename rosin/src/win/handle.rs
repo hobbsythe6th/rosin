@@ -398,10 +398,102 @@ impl WindowHandle {
         )
     }
 
-    pub fn set_clipboard_text(&self, _text: &str) {}
+    pub fn set_clipboard_text(&self, _text: &str) {
+        /*
+        // I believe I am on the right track with this code.
+        // I would like to have the ability to requeue code that fails though
+        // running low on time though so simply comma comment this out and leave it for later
+
+        use crate::platform::view::{
+            utf8_to_utf16,
+            utf16_as_pcwstr,
+        };
+
+        use windows::Win32::System::{
+            DataExchange::{
+                OpenClipboard,
+                CloseClipboard,
+                EmptyClipboard,
+                SetClipboardData,
+            },
+
+            Ole::CF_UNICODETEXT,
+        };
+
+        let utf16 = utf8_to_utf16(text);
+
+        self.view.queue_on_thread(
+            |view| {
+                unsafe {
+                    OpenClipboard(Some(view.hwnd())).ok()?;
+                    EmptyClipboard().ok()?;
+
+                    SetClipboardData(CF_UNICODETEXT.0 as u32, /* utf16 -> hmem */)
+
+                    CloseClipboard().ok()?;
+                }
+            }
+        )
+        */
+    }
 
     pub fn get_clipboard_text(&self) -> Option<String> {
-        None
+        use windows::Win32::System::{
+            DataExchange::{
+                OpenClipboard,
+                CloseClipboard,
+                GetClipboardData,
+            },
+
+            Ole::CF_UNICODETEXT,
+        };
+
+        self.view.block_on_thread(
+            move |view| {
+                unsafe {
+                    OpenClipboard(Some(view.hwnd())).ok()?
+                }
+
+                let handle = unsafe {
+                    GetClipboardData(CF_UNICODETEXT.0 as u32).ok()?
+                };
+
+                let mut got_carrige_feed = false;
+                let mut idx = 0;
+                let win32_str = handle.0 as *mut u16;
+
+                let mut string = String::new();
+
+                while unsafe { *win32_str.add(idx) } != 0 {
+                    let c = unsafe {
+                        char::from_u32_unchecked(*win32_str.add(idx) as u32)
+                    };
+
+                    match c {
+                        '\r' => got_carrige_feed = true,
+                        '\n' => {
+                            got_carrige_feed = false;
+                            string.push('\n');
+                        }
+                        c => {
+                            if got_carrige_feed {
+                                string.push('\r');
+                                got_carrige_feed = false;
+                            }
+                            string.push(c);
+                        },
+                    }
+
+                    idx += 1;
+                }
+
+                unsafe {
+                    CloseClipboard().ok()?
+                }
+
+                Some(string)
+            }
+        )
     }
 
     pub fn open_url(&self, url: &str) {
